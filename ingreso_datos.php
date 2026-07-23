@@ -125,35 +125,75 @@
         <h1>Administración de Servicios Turísticos</h1>
 
         <?php
-        // Procesamiento del formulario de VUELOS
+        // Procesamiento del formulario de VUELOS (prepared statement — previene SQL Injection)
         if (isset($_POST['btn_vuelo'])) {
-            $origen = $_POST['origen'];
-            $destino = $_POST['destino'];
-            $fecha = $_POST['fecha'];
-            $plazas = $_POST['plazas'];
-            $precio = $_POST['precio'];
+            $origen  = trim($_POST['origen']);
+            $destino = trim($_POST['destino']);
+            $fecha   = $_POST['fecha'];
+            $plazas  = (int) $_POST['plazas'];
+            $precio  = (float) $_POST['precio'];
 
-            $sql_vuelo = "INSERT INTO VUELO (origen, destino, fecha, plazas_disponibles, precio) VALUES ('$origen', '$destino', '$fecha', $plazas, $precio)";
-            if ($conn->query($sql_vuelo) === TRUE) {
+            $stmt = $conn->prepare(
+                "INSERT INTO VUELO (origen, destino, fecha, plazas_disponibles, precio) VALUES (?, ?, ?, ?, ?)"
+            );
+            $stmt->bind_param('sssid', $origen, $destino, $fecha, $plazas, $precio);
+            if ($stmt->execute()) {
                 echo "<div class='msg success'>Vuelo registrado con éxito.</div>";
             } else {
-                echo "<div class='msg error'>Error: " . $conn->error . "</div>";
+                echo "<div class='msg error'>Error al registrar vuelo: " . htmlspecialchars($stmt->error) . "</div>";
             }
+            $stmt->close();
         }
 
-        // Procesamiento del formulario de HOTELES
+        // Procesamiento del formulario de HOTELES (prepared statement — previene SQL Injection)
         if (isset($_POST['btn_hotel'])) {
-            $nombre = $_POST['nombre_hotel'];
-            $ubicacion = $_POST['ubicacion'];
-            $habitaciones = $_POST['habitaciones'];
-            $tarifa = $_POST['tarifa'];
+            $nombre       = trim($_POST['nombre_hotel']);
+            $ubicacion    = trim($_POST['ubicacion']);
+            $habitaciones = (int) $_POST['habitaciones'];
+            $tarifa       = (float) $_POST['tarifa'];
 
-            $sql_hotel = "INSERT INTO HOTEL (nombre, ubicacion, habitaciones_disponibles, tarifa_noche) VALUES ('$nombre', '$ubicacion', $habitaciones, $tarifa)";
-            if ($conn->query($sql_hotel) === TRUE) {
+            $stmt = $conn->prepare(
+                "INSERT INTO HOTEL (nombre, ubicacion, habitaciones_disponibles, tarifa_noche) VALUES (?, ?, ?, ?)"
+            );
+            $stmt->bind_param('ssid', $nombre, $ubicacion, $habitaciones, $tarifa);
+            if ($stmt->execute()) {
                 echo "<div class='msg success'>Hotel registrado con éxito.</div>";
             } else {
-                echo "<div class='msg error'>Error: " . $conn->error . "</div>";
+                echo "<div class='msg error'>Error al registrar hotel: " . htmlspecialchars($stmt->error) . "</div>";
             }
+            $stmt->close();
+        }
+
+        // ── Búsqueda de vuelos ──────────────────────────────────────────────────
+        $busqueda_realizada = false;
+        $res_busqueda       = null;
+        if (isset($_POST['btn_buscar'])) {
+            $busqueda_realizada = true;
+            $b_origen  = '%' . trim($_POST['b_origen'])  . '%';
+            $b_destino = '%' . trim($_POST['b_destino']) . '%';
+            $b_fecha   = $_POST['b_fecha'];   // puede estar vacío
+
+            if ($b_fecha !== '') {
+                $stmt = $conn->prepare(
+                    "SELECT * FROM VUELO
+                     WHERE origen  LIKE ?
+                       AND destino LIKE ?
+                       AND fecha   = ?
+                     ORDER BY fecha ASC"
+                );
+                $stmt->bind_param('sss', $b_origen, $b_destino, $b_fecha);
+            } else {
+                $stmt = $conn->prepare(
+                    "SELECT * FROM VUELO
+                     WHERE origen  LIKE ?
+                       AND destino LIKE ?
+                     ORDER BY fecha ASC"
+                );
+                $stmt->bind_param('ss', $b_origen, $b_destino);
+            }
+            $stmt->execute();
+            $res_busqueda = $stmt->get_result();
+            $stmt->close();
         }
         ?>
 
@@ -175,6 +215,49 @@
             <label>Tarifa por Noche ($):</label> <input type="number" step="0.01" name="tarifa" required min="1">
             <button type="submit" name="btn_hotel">Guardar Hotel</button>
         </form>
+
+        <hr>
+        <h2>Buscar Vuelos</h2>
+        <form action="ingreso_datos.php" method="POST">
+            <label>Origen:</label>
+            <input type="text" name="b_origen" placeholder="Ej: Santiago"
+                value="<?= isset($_POST['b_origen']) ? htmlspecialchars($_POST['b_origen']) : '' ?>">
+            <label>Destino:</label>
+            <input type="text" name="b_destino" placeholder="Ej: Lima"
+                value="<?= isset($_POST['b_destino']) ? htmlspecialchars($_POST['b_destino']) : '' ?>">
+            <label>Fecha (opcional):</label>
+            <input type="date" name="b_fecha"
+                value="<?= isset($_POST['b_fecha']) ? htmlspecialchars($_POST['b_fecha']) : '' ?>">
+            <button type="submit" name="btn_buscar" style="background:#17a2b8;">Buscar Vuelos</button>
+        </form>
+
+        <?php if ($busqueda_realizada): ?>
+            <h3>Resultados de búsqueda</h3>
+            <?php if ($res_busqueda && $res_busqueda->num_rows > 0): ?>
+                <table>
+                    <tr>
+                        <th>ID</th>
+                        <th>Origen</th>
+                        <th>Destino</th>
+                        <th>Fecha</th>
+                        <th>Plazas</th>
+                        <th>Precio</th>
+                    </tr>
+                    <?php while ($row = $res_busqueda->fetch_assoc()): ?>
+                        <tr>
+                            <td><?= $row['id_vuelo'] ?></td>
+                            <td><?= htmlspecialchars($row['origen']) ?></td>
+                            <td><?= htmlspecialchars($row['destino']) ?></td>
+                            <td><?= $row['fecha'] ?></td>
+                            <td><?= $row['plazas_disponibles'] ?></td>
+                            <td>$<?= number_format($row['precio'], 2) ?></td>
+                        </tr>
+                    <?php endwhile; ?>
+                </table>
+            <?php else: ?>
+                <div class="msg error">No se encontraron vuelos con los criterios ingresados.</div>
+            <?php endif; ?>
+        <?php endif; ?>
 
         <hr>
         <h2>Consultas Simples: Datos Registrados</h2>
